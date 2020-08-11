@@ -1,0 +1,9 @@
+data
+*.xlsx
+*.DS_store
+*.out
+*.in
+exp*
+*output
+*trash
+*.gr
