@@ -1,0 +1,11 @@
+{
+  "C_Cpp.clang_format_style": "Google",
+  "editor.formatOnSave": true,
+  "editor.formatOnType": true,
+  "[cpp]": {
+    "editor.tabSize": 4
+  },
+  "editor.quickSuggestionsDelay": 1,
+  "editor.tabCompletion": "onlySnippets",
+  "C_Cpp.default.cppStandard": "c++14"
+}

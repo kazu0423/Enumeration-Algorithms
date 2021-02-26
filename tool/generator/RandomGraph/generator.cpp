@@ -44,9 +44,9 @@ void randomGraph(std::ofstream &output_file, int n, double density = -1){
     }
     for (int i = 0; i < n; i++) connected &= uf.same(0, i);
   }
-  output_file << "p edges " <<  n << " " << edge.size() << std::endl;
+  output_file <<  n << " " << edge.size() << std::endl;
   for (auto add: edge) {
-    output_file << "e " << add.first + 1 << " " << add.second + 1 << std::endl;
+    output_file << add.first + 1 << " " << add.second + 1 << std::endl;
   }
 }
 
