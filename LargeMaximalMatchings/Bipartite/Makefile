@@ -1,4 +1,4 @@
-SRCS	 = main.cpp enum.cpp graph.cpp
+SRCS	 = main.cpp enum.cpp bipartite.cpp
 CXX		 = g++
 CXXFLAGS = -std=c++17 -O3 -fdiagnostics-color -I ~/boost_1_63_0 
 EXE		 = ELM

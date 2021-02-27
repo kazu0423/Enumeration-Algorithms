@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
     int u, v;
     sscanf(tmp.data(), "%d %d", &u, &v);
     u--, v--;
-    boost::add_edge(u, v, TG);
+    boost::add_edge(u, v, GB);
     H[u].push_back(v);
     H[v].push_back(u);
     e_to_id[u][v] = e_to_id[v][u] = id++;
