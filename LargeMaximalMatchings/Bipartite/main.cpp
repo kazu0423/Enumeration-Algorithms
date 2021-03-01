@@ -18,44 +18,6 @@
 #include "enum.hpp"
 #include "bipartite.hpp"
 
-void func(BipartiteGraph &G, boost::dynamic_bitset<> &m, std::vector<int> &matched) {
-  for (int i = 0; i < G.size(); i++) matched[i] = -1;
-  for (int i = 0; i < G.edgeSize(); i++) {
-    if (m.test(i) == true) {
-      int u = G.getEdge(i).first, v = G.getEdge(i).second;
-      matched[u] = matched[v] = i;
-    }
-  }
-}
-
-bool checkMaximality(BipartiteGraph &G, boost::dynamic_bitset<> &m) {
-  int n = G.size();
-  std::vector<int> matched(n);
-  func(G, m, matched);
-  for (int i = 0; i < n; i++) {
-    for (int j = 0; j < G[i].size(); j++) {
-      if (matched[i] == -1 and matched[G[i][j]] == -1) {
-        std::cout << G.edgeSize() << std::endl;
-        for (int k = 0; k < G.edgeSize(); k++) {
-          if (m.test(k)) {
-            std::cout << "{" << G.getEdge(k).first << " " << G.getEdge(k).second
-                      << "}" << std::endl;
-          }
-        }
-        std::cout << "Edges:" << std::endl;
-        for (int k = 0; k < G.edgeSize(); k++) {
-          std::cout << "{" << G.getEdge(k).first << " " << G.getEdge(k).second
-                    << "}" << std::endl;
-        }
-        std::cout << i << " " << G[i][j] << std::endl;
-        std::cout << m << std::endl;
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 int main(int argc, char *argv[]) {
   std::ifstream ist(argv[1], std::ios::in);
   if (!ist) {
@@ -81,38 +43,44 @@ int main(int argc, char *argv[]) {
     Ymax = std::max(v, Ymax);
   }
   n = Xmax + Ymax + 2;
-  std::cout << n << std::endl;
   H.resize(n);
   e_to_id.resize(n, std::vector<int>(n, -1));
   for (int i = 0; i < X.size(); i++) {
     int u = X[i], v = Y[i] + Xmax + 1;
+    if(e_to_id[u][v] != -1)continue;
+    e_to_id[u][v] = e_to_id[v][u] = id++;
     H[u].push_back(v);
     H[v].push_back(u);
-    e_to_id[u][v] = e_to_id[v][u] = id++;
     id_to_e.push_back(std::pair<int, int>(u, v));
   }
   m = id_to_e.size();
-  BipartiteGraph G(H, Xmax, Ymax, e_to_id, id_to_e);  
-
+  std::cout << n << " " << m << " " << Xmax << std::endl;
+  BipartiteGraph G(H, Xmax + 1, Ymax + 1, e_to_id, id_to_e);  
   auto start = std::chrono::system_clock::now();
   std::set<boost::dynamic_bitset<> > LMM;
-  std::cout << "enumerate " << k << "-best solutions. " << std::endl;
-  KBest(G, k, LMM);
+  if(std::atoi(argv[3]) == 0){
+    std::cout << "Solve " << k << "-best solutions. " << std::endl;
+    KBest(G, k, LMM);
+  }else{
+    std::cout << "Enumerate maximal matchings with cardinality at least " << k << "." << std::endl;    
+    EnumerateLMM(G, k, LMM);
+  }
   auto end = std::chrono::system_clock::now();
   auto diff = end - start;
-  printf("%lld\n", std::chrono::duration_cast<std::chrono::milliseconds>(diff).count());
+  printf("time: %lld\n", std::chrono::duration_cast<std::chrono::milliseconds>(diff).count());
          
-  std::vector<int> distribution(n / 2 + 10);
+  std::vector<int> distribution(n/2+1);
   for (auto s : LMM) {
-    if (not checkMaximality(G, s)) {
+    if (not checkSolution(G, s)) {
       std::cerr << "Error: Non-maximal solution. " << std::endl;
       return 0;
     }
     distribution[s.count()]++;
-    std::cout << s.count() << ":" << s << std::endl;
+    // std::cout << s.count() << ":" << s << std::endl;
   }
   for (int i = 0; i < distribution.size(); i++) {
     std::cout << std::setw(2) << i << ": " << distribution[i] << std::endl;
   }
+  std::cout << "total MM:" << LMM.size() << std::endl;
   return 0;
 }
