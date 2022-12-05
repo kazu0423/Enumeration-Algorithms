@@ -3,11 +3,11 @@ CXX		 = g++-8
 CXXFLAGS = -std=c++14 -O3
 EXE		 = EST
 
-EST:$(SRCS)
+EVC:$(SRCS)
 	$(CXX)  $(SRCS) -o $@ $(CXXFLAGS)
 
 debug:$(SRCS)
 	$(CXX) $(CXXFLAGS) -D_GLIBCXX_DEBUG $(SRCS) -o $@
 
 clean:
-	-rm -f EIS
+	-rm -f EVC

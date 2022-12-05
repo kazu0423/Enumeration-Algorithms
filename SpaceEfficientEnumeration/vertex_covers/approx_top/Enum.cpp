@@ -13,8 +13,9 @@ using pii = std::pair<int, int>;
 EVC::EVC(std::vector<std::vector<edge> > H, std::vector<int> vcost){
   G = H;
   n = G.size(), m = 0;
-  cost.resize(n);
-  for(int i = 0; i < n; i++) m += G[i].size(), cost[i] = vcost[i];
+  cost = vcost;
+  for(int i = 0; i < n; i++) m += G[i].size();
+  m /= 2;
   elist.resize(m);
   for(int i = 0; i < n; i++) {
     for(int j = 0; j < G[i].size(); j++) {
@@ -26,20 +27,63 @@ EVC::EVC(std::vector<std::vector<edge> > H, std::vector<int> vcost){
 
 
 //local ratio
-int EVC::FindAppMinVC(instance &ins, std::vector<int> &res, bool flag){
-  std::vector<int> local = cost;
-  for(int i = 0; i < n; i++) local[i] = local[i]*(1-ins.I[i]);
-
+int EVC::FindAppMinVC(instance &ins, std::vector<bool> &res, bool flag){
+  bool isVC = true;
   for(int i = 0; i < m; i++) {
-    int u = elist[i].from, v = elist[i].to, c;
+    int u = elist[i].from, v = elist[i].to;
+    isVC &= (ins.I[u] or ins.I[v]);
+  }
+  if(isVC){
+    // std::cout << "isVC" << std::endl;
+    int mini = 1e9, id, val = 0;
+    for(int i = 0; i < n; i++) {
+      val += cost[i]*ins.I[i];
+      if(cost[i] < mini and ins.I[i] == false and ins.O[i] == false){
+        mini = cost[i];
+        id = i;
+      }
+    }
+    // std::cout << "mini:" << mini << " id:" << id << std::endl;
+    if(flag) {
+      res = ins.I;
+      if(mini != 1e9) res[id] = true;      
+    }
+    return val + mini;
+  }
+
+
+  std::vector<int> local = cost;
+  for(int i = 0; i < n; i++) local[i] *= (1-ins.I[i]);
+
+  for(int i = 0; i < n; i++) {
+    if(not ins.O[i])continue;
+    for(int j = 0; j < G[i].size(); j++) {
+      int w = G[i][j].to;
+      local[w] = 0;
+      if(ins.O[w]) {
+        // std::cout << "case 1: both end points are not contained. " << i << ", " << w << std::endl;
+        return 1e9;
+      }
+    }
+  }
+  // std::cout << "local:";
+  // for(int i = 0; i < n; i++) {
+  //   std::cout << local[i];
+  // }
+  // std::cout << std::endl;
+  for(int i = 0; i < m; i++) {
+    int u = elist[i].from, v = elist[i].to;
+    // std::cout << "prev u:" << u << " v:" << v << std::endl;    
     if(local[v] < local[u])std::swap(u, v);
+    // std::cout << "swap u:" << u << " v:" << v << std::endl;    
     local[v] -= local[u];
     local[u] = 0;
   }
   for(int i = 0; i < n; i++) {
     if(local[i] > 0) continue;
-    bool minimize = true;
-    for(int j = 0; j < G[i].size(); j++) {
+
+    bool minimize = ((not ins.I[i]) and (not ins.O[i]));
+    for(int j = 0; j < G[i].size() and minimize; j++) {
       minimize &= (local[G[i][j].to] == 0);
     }
     if(minimize) local[i] = 1;
@@ -47,59 +91,63 @@ int EVC::FindAppMinVC(instance &ins, std::vector<int> &res, bool flag){
   int val = 0;
   for(int i = 0; i < n; i++) {
     val += cost[i]*(local[i] == 0);
-  }
-  if(flag){
-    for(int i = 0; i < n; i++) res[i] = (local[i] == 0);  
+    if(flag) res[i] = (local[i] == 0);  
   }
   return val;
 }
-
 
 void EVC::Enumerate(int k){
   std::priority_queue<instance, std::vector<instance>, std::greater<instance> > que;
   instance ins(n, 0);
   que.push(ins);
-  std::vector<int> VC(n);
-  std::vector<bool> I(n), O(n);
+  std::vector<bool> VC(n);
   while(k > ans.size() and not que.empty()){
+    max_que_size = std::max(max_que_size, (int)que.size());
     ins = que.top();
     que.pop();
     int val = FindAppMinVC(ins, VC, 1);
+    ans.push_back(VC);
     for(int i = 0; i < n; i++) {
       if(VC[i] == false or ins.I[i])continue;
-      I = ins.I, O = ins.O;
-      O[i] = true;
-
-      bool addible = (val < 1e8);
-      for(int j = 0; j < G[i].size(); j++) {
-        I[G[i][j].to] = true;
-        addible &= (O[G[i][j].to] == false);
-      }
-      if(addible){
-        instance next(n, val);
-        next.I = I, next.O = O;
+      ins.O[i] = true;
+      int tmp = FindAppMinVC(ins, VC);
+      if(tmp < 1e9){
+        instance next(n, tmp);
+        next.I = ins.I, next.O = ins.O;
         que.push(next);
       }
-      ins.I[i] = true;
+      ins.I[i] = true, ins.O[i] = false;
     }
-    ans.push_back(ins.I);
+    if(val >= 1e9){
+      std::cout << "shine." << std::endl;
+    }
+    instance next(n, val);
+    next.I = VC, next.O = ins.O;
+    if(FindAppMinVC(next, VC) < 1e9) que.push(next);
   }
 }
 
 void EVC::print(){
-  std::cout << "ans size:" << ans.size() << std::endl;
-  for(int i = 0; i < ans.size(); i++) {
-    int c = 0;
-    for(int j = 0; j < ans[i].size(); j++) {
-      std::cout << ans[i][j];
-      c += cost[j]*ans[i][j];
+  std::cout << "ans size:" << ans.size() << " max que size:" << max_que_size << std::endl;
+  // for(int i = 0; i < ans.size(); i++) {
+  //   int c = 0;
+  //   for(int j = 0; j < ans[i].size(); j++) {
+  //     std::cout << ans[i][j];
+  //     c += cost[j]*ans[i][j];
+  //   }
+  //   std::cout << ":" << c << std::endl;
+  // }
+  // for(int i = 0; i < n; i++) {
+  //   for(int j = 0; j < G[i].size(); j++) {
+  //     std::cout << G[i][j].to << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  sort(ans.begin(), ans.end());
+  for(int i = 0; i < ans.size()-1; i++) {
+    if(ans[i] == ans[i+1]){
+      std::cout << "dupulication." << std::endl;
+      exit(1);
     }
-    std::cout << ":" << c << std::endl;
-  }
-  for(int i = 0; i < n; i++) {
-    for(int j = 0; j < G[i].size(); j++) {
-      std::cout << G[i][j].to << " ";
-    }
-    std::cout << std::endl;
   }
 }

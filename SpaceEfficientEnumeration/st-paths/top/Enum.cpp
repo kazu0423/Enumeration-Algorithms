@@ -98,6 +98,7 @@ void EST::Enumerate(int s, int t, int k){
   que.push(ins);
   std::vector<int> P(n);
   while(k > ans.size() and not que.empty()){
+    max_que_size = std::max(max_que_size, (int)que.size());
     ins = que.top();
     s = ins.s, t = ins.t;
     que.pop();
@@ -124,27 +125,27 @@ void EST::Enumerate(int s, int t, int k){
 }
 
 void EST::print(){
-  std::cout << "ans size:" << ans.size() << std::endl;
-  for(int i = 0; i < ans.size(); i++) {
-    for(int j = 0; j < ans[i].size(); j++) {
-      std::cout << ans[i][j];
-    }
-     std::cout << std::endl;
-     int len = 0;
-     for(int j = 0; j < ans[i].size(); j++) {
-       if(ans[i][j]){
-         std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
-         len += elist[j].cost;
-       }
-     }
-     std::cout << std::endl;
-     std::cout << "len:" << len << std::endl;
-     std::cout << std::endl;
-  }
-  for(int i = 0; i < n; i++) {
-    for(int j = 0; j < G[i].size(); j++) {
-      std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
-    }
-    std::cout << std::endl;
-  }
+  std::cout << "ans size:" << ans.size() << " max queue size:" << max_que_size << std::endl;
+  // for(int i = 0; i < ans.size(); i++) {
+  //   for(int j = 0; j < ans[i].size(); j++) {
+  //     std::cout << ans[i][j];
+  //   }
+    //  std::cout << std::endl;
+    //  int len = 0;
+    //  for(int j = 0; j < ans[i].size(); j++) {
+    //    if(ans[i][j]){
+    //      std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
+    //      len += elist[j].cost;
+    //    }
+    //  }
+    //  std::cout << std::endl;
+    //  std::cout << "len:" << len << std::endl;
+    //  std::cout << std::endl;
+  // }
+  // for(int i = 0; i < n; i++) {
+  //   for(int j = 0; j < G[i].size(); j++) {
+  //     std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
 }

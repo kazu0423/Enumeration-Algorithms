@@ -15,7 +15,7 @@ typedef std::pair<int, int> pii;
 std::mt19937 mt(114);
 
 
-void randomGraph(std::ofstream &output_file, int n, double density = -1){
+void randomGraph(std::ofstream &output_file, int n, int W, double density = -1){
   if(density == -1)density = sqrt(n)*n/2;
   int cnt = 0;
   std::vector<pii> edge;
@@ -46,15 +46,15 @@ void randomGraph(std::ofstream &output_file, int n, double density = -1){
   }
   output_file <<  n << " " << edge.size() << std::endl;
   for (auto add: edge) {
-    output_file << add.first + 1 << " " << add.second + 1 << std::endl;
+    output_file << add.first << " " << add.second << " " << (mt()%W)+1<< std::endl;
   }
 }
 
 int main(int argc, char *argv[]){
   double density;
-  int n;
-  if(argc == 3){
-    n = atoi(argv[1]), density = atof(argv[2]); 
+  int n, W;
+  if(argc == 4){
+    n = atoi(argv[1]), W = atoi(argv[2]), density = atof(argv[3]); 
   }else{
     std::cerr << "Enter the number of vertices and density." << std::endl;
     exit(1);
@@ -65,11 +65,11 @@ int main(int argc, char *argv[]){
     char tmp[5];
     sprintf(tmp, "%02d", i);
     std::string id = tmp;
-    name = "randomGraph_" + std::to_string(n).substr(0, 3) + "_" + std::to_string(density).substr(0, 4) + "_" + id + ".in";
+    name = "randomGraph_" + std::to_string(n).substr(0, 3) + "_" + std::to_string(W).substr(0, 3) + "_" + std::to_string(density).substr(0, 4) + ".in";
     std::cout << name << std::endl;
     // std::cout << "generate random case" << std::endl;
     std::ofstream output_file(name.c_str());
-    randomGraph(output_file, n, density);
+    randomGraph(output_file, n, W, density);
     output_file.close();
   }
   return 0;

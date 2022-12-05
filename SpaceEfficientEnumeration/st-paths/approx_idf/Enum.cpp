@@ -99,6 +99,7 @@ void EST::Enumerate(int s, int t, double eps, int k){
   double prev = len;
   for(int i = 0; i < m; i++) total_weight += elist[i].cost;
   while(len < total_weight and ans.size() < k){
+    std::cout << len << std::endl;    
     if(DFS(ins, k, len, len*(1+eps)) == 1e9) break;
     len *= (1+eps);
   }
@@ -109,7 +110,8 @@ int EST::DFS(instance &ins, int k, double mini, double maxi){
   int weight = 0;
   for(int i = 0; i < m; i++) weight += elist[i].cost*ins.I[i];
   int val = ComputeShortestPathLength(ins.I, ins.O, ins.s, ins.t) + weight, len = 0;
-  if(val >= maxi) return val;
+  // std::cout << "ans:" << ans.size() << std::endl;
+  if(val >= maxi or ans.size() >= k) return val;
   int res = 1e9;
   std::vector<int> P(n);
   FindShortestPath(ins, P, len);
@@ -133,26 +135,26 @@ int EST::DFS(instance &ins, int k, double mini, double maxi){
 
 void EST::print(){
   std::cout << "ans size:" << ans.size() << std::endl;
-  for(int i = 0; i < ans.size(); i++) {
-    for(int j = 0; j < ans[i].size(); j++) {
-      std::cout << ans[i][j];
-    }
-     std::cout << std::endl;
-     int len = 0;
-     for(int j = 0; j < ans[i].size(); j++) {
-       if(ans[i][j]){
-         std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
-         len += elist[j].cost;
-       }
-     }
-     std::cout << std::endl;
-     std::cout << "len:" << len << std::endl;
-     std::cout << std::endl;
-  }
-  for(int i = 0; i < n; i++) {
-    for(int j = 0; j < G[i].size(); j++) {
-      std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
-    }
-    std::cout << std::endl;
-  }
+  // for(int i = 0; i < ans.size(); i++) {
+    // for(int j = 0; j < ans[i].size(); j++) {
+    //   std::cout << ans[i][j];
+    // }
+    //  std::cout << std::endl;
+    //  int len = 0;
+    //  for(int j = 0; j < ans[i].size(); j++) {
+    //    if(ans[i][j]){
+        //  std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
+        //  len += elist[j].cost;
+      //  }
+    //  }
+    //  std::cout << std::endl;
+    //  std::cout << len << std::endl;
+    //  std::cout << std::endl;
+  // }
+  // for(int i = 0; i < n; i++) {
+  //   for(int j = 0; j < G[i].size(); j++) {
+  //     std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
 }

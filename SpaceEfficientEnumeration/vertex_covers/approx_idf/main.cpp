@@ -1,6 +1,6 @@
 ////////////////////////////////////////
 /*                                    */
-/* Top-k st-paths                     */
+/* 2-approximate top-k vertex covers  */
 /* poly. time and poly. space         */
 /* kurita                             */
 /*                                    */
@@ -17,7 +17,7 @@
 
 
 int main(int argc, char *argv[]){
-  if(argc != 2){
+  if(argc != 5){
     std::cerr << "Error : The number of input file is not 2" <<std::endl;
     return 0;
   }
@@ -27,36 +27,33 @@ int main(int argc, char *argv[]){
     std::cerr << "can't open input file: " << argv[1] << std::endl;
     return 0;
   }
-  int n, m, k, cnt = 0;
-  double eps;
+  int n, m, k = std::atoi(argv[2]), cnt = 0, W = std::atoi(argv[4]);
+  double eps = std::atof(argv[3]);
   std::mt19937 mt(11); 
   std::string tmp;
   getline(ist, tmp);
-  sscanf(tmp.data(), "%d %d %d %lf", &n, &m, &k, &eps);  
-  std::vector<int> vertex_weight(n);
-  while(std::getline(ist, tmp, ' ')){
-    vertex_weight.push_back(std::atoi(tmp.c_str()));
-  }
+  sscanf(tmp.data(), "%d %d", &n, &m);
   std::vector<std::vector<edge> > G(n);
-  while(std::getline(ist, tmp)){
+  while(getline(ist, tmp)){
     int u, v, c;
     // sscanf(tmp.data(), "%d %d %d", &u, &v, &c);
     sscanf(tmp.data(), "%d %d", &u, &v);
-    c = (mt()%20)+1;
-    G[u].push_back(edge(u, v, c, cnt));
-    G[v].push_back(edge(v, u, c, cnt++));
+    G[u].push_back(edge(u, v, cnt));
+    G[v].push_back(edge(v, u, cnt++));
   }
-  std::cout << n << " " << m << std::endl;
-  EST est(G);
+  std::vector<int> cost(n);
+  for(int i = 0; i < n; i++) cost[i] = (mt()%W)+1;
+  std::cout << n << " " << m << " " << cnt << std::endl;
+  EVC evc(G, cost);
   
   auto start = std::chrono::system_clock::now();
-  est.Enumerate(0, n-1, eps, k);  
+  evc.Enumerate(k, eps);
   auto end = std::chrono::system_clock::now();
   auto diff = end - start;
   std::cout << "elapsed time = "
             << std::chrono::duration_cast<std::chrono::milliseconds>(diff).count()
             << " msec."
             << std::endl;  
-  est.print();
+  evc.print();
   return 0;
 }

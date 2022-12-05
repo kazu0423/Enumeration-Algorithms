@@ -47,7 +47,7 @@ private:
   int ComputeShortestPathLength(std::vector<bool> &I, std::vector<bool> &O, int s, int t);
   std::vector<std::vector<edge> > G;
   std::vector<edge> elist;
-  int n, m;
+  int n, m, max_que_size = 0;
   std::vector<std::vector<bool> > ans;
 };
 #endif // __ENUM__

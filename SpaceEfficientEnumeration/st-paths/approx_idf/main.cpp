@@ -17,8 +17,8 @@
 
 
 int main(int argc, char *argv[]){
-  if(argc != 2){
-    std::cerr << "Error : The number of input file is not 2" <<std::endl;
+  if(argc != 4){
+    std::cerr << "Error : The number of input file is not 4" <<std::endl;
     return 0;
   }
   
@@ -27,12 +27,12 @@ int main(int argc, char *argv[]){
     std::cerr << "can't open input file: " << argv[1] << std::endl;
     return 0;
   }
-  int n, m, k, cnt = 0;
-  double eps;
+  int n, m, k = std::atoi(argv[2]), cnt = 0;
+  double eps = std::atof(argv[3]);
   std::mt19937 mt(11); 
   std::string tmp;
   getline(ist, tmp);
-  sscanf(tmp.data(), "%d %d %d %lf", &n, &m, &k, &eps);  
+  sscanf(tmp.data(), "%d %d", &n, &m);  
   std::vector<std::vector<edge> > G(n);
   while(getline(ist, tmp)){
     int u, v, c;

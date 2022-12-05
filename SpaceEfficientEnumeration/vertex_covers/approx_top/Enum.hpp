@@ -40,11 +40,11 @@ public:
   void Enumerate(int k);
   void print();
 private:
-  int FindAppMinVC(instance &ins, std::vector<int> &res, bool flag = false);
+  int FindAppMinVC(instance &ins, std::vector<bool> &res, bool flag = false);
   std::vector<std::vector<edge> > G;
   std::vector<edge> elist;
   std::vector<int> cost;
-  int n, m;
+  int n, m, max_que_size = 0;
   std::vector<std::vector<bool> > ans;
 };
 #endif // __ENUM__

@@ -40,11 +40,11 @@ public:
   EST(std::vector<std::vector<edge> > H);
   ~EST(){};
   inline int size(){return G.size();}
-  void Enumerate(int s, int t, double eps, int k);
+  void Enumerate(int s, int t, int k);
   void print();
 private:
   void FindShortestPath(instance &ins, std::vector<int> &res, int &len);
-  int DFS(instance &ins, int k, double mini, double maxi);
+  int DFS(instance &ins, int &k, double mini, double maxi);
   int ComputeShortestPathLength(std::vector<bool> &I, std::vector<bool> &O, int s, int t);
   std::vector<std::vector<edge> > G;
   std::vector<edge> elist;

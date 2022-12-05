@@ -17,7 +17,7 @@
 
 
 int main(int argc, char *argv[]){
-  if(argc != 2){
+  if(argc != 3){
     std::cerr << "Error : The number of input file is not 2" <<std::endl;
     return 0;
   }
@@ -27,18 +27,15 @@ int main(int argc, char *argv[]){
     std::cerr << "can't open input file: " << argv[1] << std::endl;
     return 0;
   }
-  int n, m, k, cnt = 0;
-  double eps;
+  int n, m, k = std::atoi(argv[2]), cnt = 0;
   std::mt19937 mt(11); 
   std::string tmp;
   getline(ist, tmp);
-  sscanf(tmp.data(), "%d %d %d %lf", &n, &m, &k, &eps);  
+  sscanf(tmp.data(), "%d %d", &n, &m);  
   std::vector<std::vector<edge> > G(n);
   while(getline(ist, tmp)){
     int u, v, c;
-    // sscanf(tmp.data(), "%d %d %d", &u, &v, &c);
-    sscanf(tmp.data(), "%d %d", &u, &v);
-    c = (mt()%20)+1;
+    sscanf(tmp.data(), "%d %d %d", &u, &v, &c);
     G[u].push_back(edge(u, v, c, cnt));
     G[v].push_back(edge(v, u, c, cnt++));
   }
@@ -46,7 +43,7 @@ int main(int argc, char *argv[]){
   EST est(G);
   
   auto start = std::chrono::system_clock::now();
-  est.Enumerate(0, n-1, eps, k);  
+  est.Enumerate(0, n-1, k);  
   auto end = std::chrono::system_clock::now();
   auto diff = end - start;
   std::cout << "elapsed time = "

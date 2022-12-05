@@ -91,20 +91,21 @@ void EST::FindShortestPath(instance &ins, std::vector<int> &res, int &len){
   }
 }
 
-void EST::Enumerate(int s, int t, double eps, int k){
+void EST::Enumerate(int s, int t, int k){
   instance ins(s, t, m, 0);
   double len = ComputeShortestPathLength(ins.I, ins.O, s, t);
   int total_weight = 0;
   double next_mini = len + 0.000001;
   double prev = len;
   for(int i = 0; i < m; i++) total_weight += elist[i].cost;
-  while(len < total_weight and ans.size() < k){
+  // while(len < total_weight and ans.size() < k){
+  while(len < total_weight and k > 0){
     prev = DFS(ins, k, prev, next_mini);
     std::swap(prev, next_mini);
   }
 }
 
-int EST::DFS(instance &ins, int k, double mini, double maxi){
+int EST::DFS(instance &ins, int &k, double mini, double maxi){
   instance tmp = ins;
   int weight = 0;
   for(int i = 0; i < m; i++) weight += elist[i].cost*ins.I[i];
@@ -115,7 +116,8 @@ int EST::DFS(instance &ins, int k, double mini, double maxi){
   FindShortestPath(ins, P, len);
   std::vector<bool> sol = ins.I;
   for(int i = 0; i < len; i++) sol[elist[P[i]].id] = true;
-  if(mini <= val and val < maxi and ans.size() < k) ans.push_back(sol);
+  // if(mini <= val and val < maxi and ans.size() < k) ans.push_back(sol);
+  if(mini <= val and val < maxi and k > 0) k--;
 
   for(int i = 0; i < len; i++) {
     edge e = elist[P[i]];
@@ -132,26 +134,26 @@ int EST::DFS(instance &ins, int k, double mini, double maxi){
 
 void EST::print(){
   std::cout << "ans size:" << ans.size() << std::endl;
-  for(int i = 0; i < ans.size(); i++) {
-    for(int j = 0; j < ans[i].size(); j++) {
-      std::cout << ans[i][j];
-    }
-     std::cout << std::endl;
-     int len = 0;
-     for(int j = 0; j < ans[i].size(); j++) {
-       if(ans[i][j]){
-         std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
-         len += elist[j].cost;
-       }
-     }
-     std::cout << std::endl;
-     std::cout << "len:" << len << std::endl;
-     std::cout << std::endl;
-  }
-  for(int i = 0; i < n; i++) {
-    for(int j = 0; j < G[i].size(); j++) {
-      std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
-    }
-    std::cout << std::endl;
-  }
+  // for(int i = 0; i < ans.size(); i++) {
+  //   for(int j = 0; j < ans[i].size(); j++) {
+  //     std::cout << ans[i][j];
+  //   }
+  //    std::cout << std::endl;
+  //    int len = 0;
+  //    for(int j = 0; j < ans[i].size(); j++) {
+  //      if(ans[i][j]){
+  //        std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
+  //        len += elist[j].cost;
+  //      }
+  //    }
+  //    std::cout << std::endl;
+  //    std::cout << "len:" << len << std::endl;
+  //    std::cout << std::endl;
+  // }
+  // for(int i = 0; i < n; i++) {
+  //   for(int j = 0; j < G[i].size(); j++) {
+  //     std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
 }

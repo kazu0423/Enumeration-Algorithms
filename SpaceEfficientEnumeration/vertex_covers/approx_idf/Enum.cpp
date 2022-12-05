@@ -7,13 +7,14 @@
 
 #include"Enum.hpp"
 
-using bigint = long long int;
 using pii = std::pair<int, int>;
 
-EST::EST(std::vector<std::vector<edge> > H){
+EVC::EVC(std::vector<std::vector<edge> > H, std::vector<int> vcost){
   G = H;
   n = G.size(), m = 0;
+  cost = vcost;
   for(int i = 0; i < n; i++) m += G[i].size();
+  m /= 2;
   elist.resize(m);
   for(int i = 0; i < n; i++) {
     for(int j = 0; j < G[i].size(); j++) {
@@ -24,136 +25,175 @@ EST::EST(std::vector<std::vector<edge> > H){
 }
 
 
-int EST::ComputeShortestPathLength (std::vector<bool> &I, std::vector<bool> &O ,int s, int t){
-  std::priority_queue<pii, std::vector<pii>, std::greater<pii> > que;
-  std::vector<int> dp(n, 1e9);
-  for(int i = 0; i < n; i++) {
-    if(I[i]){
-      edge e = elist[i];
-      dp[e.from] = dp[e.to] = 0;
-    }
+//local ratio
+int EVC::FindAppMinVC(instance ins, std::vector<bool> &res, bool flag){
+  bool isVC = true;
+  for(int i = 0; i < m; i++) {
+    int u = elist[i].from, v = elist[i].to;
+    isVC &= (ins.I[u] or ins.I[v]);
   }
-  dp[s] = 0;
-  que.push(pii(0, s));
-  while(not que.empty()){
-    int c = que.top().first;
-    int v = que.top().second; 
-    que.pop();
-    for(int i = 0; i < G[v].size(); i++) {
-      edge e = G[v][i];
-      if(O[e.id] or I[e.id])continue;
-      if(dp[e.to] > c + e.cost){
-        dp[e.to] = c + e.cost;
-        que.push(pii(dp[e.to], e.to));
+  if(isVC){
+    // std::cout << "isVC" << std::endl;
+    int mini = 1e9, id, val = 0;
+    for(int i = 0; i < n; i++) {
+      val += cost[i]*ins.I[i];
+      if(cost[i] < mini and ins.I[i] == false and ins.O[i] == false){
+        mini = cost[i];
+        id = i;
+      }
+    }
+    // std::cout << "mini:" << mini << " id:" << id << std::endl;
+    if(flag) {
+      res = ins.I;
+      if(mini != 1e9) res[id] = true;      
+    }
+    return val + mini;
+  }
+
+
+  std::vector<int> local = cost;
+  for(int i = 0; i < n; i++) local[i] *= (1-ins.I[i]);
+
+  for(int i = 0; i < n; i++) {
+    if(not ins.O[i])continue;
+    for(int j = 0; j < G[i].size(); j++) {
+      int w = G[i][j].to;
+      local[w] = 0;
+      if(ins.O[w]) {
+        // std::cout << "case 1: both end points are not contained. " << i << ", " << w << std::endl;
+        return 1e9;
       }
     }
   }
-  return dp[t];
-}
-
-
-void EST::FindShortestPath(instance &ins, std::vector<int> &res, int &len){
-  int s = ins.s, t = ins.t;
-  std::vector<bool> I = ins.I, O = ins.O;
-  std::priority_queue<pii, std::vector<pii>, std::greater<pii> > que;
-  std::vector<int> dp(n, 1e9), restore(2*n, -1);
+  // std::cout << "local:";
+  // for(int i = 0; i < n; i++) {
+  //   std::cout << local[i];
+  // }
+  // std::cout << std::endl;
+  for(int i = 0; i < m; i++) {
+    int u = elist[i].from, v = elist[i].to;
+    // std::cout << "prev u:" << u << " v:" << v << std::endl;    
+    if(local[v] < local[u])std::swap(u, v);
+    // std::cout << "swap u:" << u << " v:" << v << std::endl;    
+    local[v] -= local[u];
+    local[u] = 0;
+  }
   for(int i = 0; i < n; i++) {
-    if(I[i]){
-      edge e = elist[i];
-      dp[e.from] = dp[e.to] = 0;
+    if(local[i] > 0) continue;
+
+    bool minimize = ((not ins.I[i]) and (not ins.O[i]));
+    for(int j = 0; j < G[i].size() and minimize; j++) {
+      minimize &= (local[G[i][j].to] == 0);
     }
+    if(minimize) local[i] = 1;
   }
-  dp[s] = 0;
-  que.push(pii(0, s));
-  while(not que.empty()){
-    int c = que.top().first;
-    int v = que.top().second;
-    que.pop();
-    for(int i = 0; i < G[v].size(); i++) {
-      edge e = G[v][i];
-      if(O[e.id] or I[e.id])continue;
-      if(dp[e.to] > c + e.cost){
-        dp[e.to] = c + e.cost;
-        que.push(pii(dp[e.to], e.to));
-        restore[2*e.to]   = v;
-        restore[2*e.to+1] = e.id;
-      }
-    }
+  int val = 0;
+  for(int i = 0; i < n; i++) {
+    val += cost[i]*(local[i] == 0);
+    if(flag) res[i] = (local[i] == 0);  
   }
-  std::vector<int> id_list;
-  int tmp = t;
-  while(tmp != s){
-    id_list.push_back(restore[2*tmp + 1]);
-    tmp = restore[2*tmp];
-  }
-  reverse(id_list.begin(), id_list.end());
-  for(int i = 0; i < id_list.size(); i++) {
-    res[len++] = id_list[i];
+  return val;
+}
+
+
+void EVC::Enumerate(int k, double eps){
+  instance ins(n, 0);
+  std::vector<bool> VC(n, false);
+
+  double val = FindAppMinVC(ins, VC)/2. - 1;
+  while(k > ans.size()){
+    std::cout << "val:" << val << ", " << (1+eps)*val << std::endl;
+    if(DFS(ins, k, val, (1+eps)*val) >= 1e8)break;
+    val *= (1+eps);
   }
 }
 
-void EST::Enumerate(int s, int t, double eps, int k){
-  instance ins(s, t, m, 0);
-  double len = ComputeShortestPathLength(ins.I, ins.O, s, t);
-  int total_weight = 0;
-  double next_mini = len + 0.000001;
-  double prev = len;
-  for(int i = 0; i < m; i++) total_weight += elist[i].cost;
-  while(len < total_weight and ans.size() < k){
-    if(DFS(ins, k, len, len*(1+eps)) == 1e9) break;
-    len *= (1+eps);
-  }
-}
+int EVC::DFS(instance ins, int k, double mini, double maxi, bool output) {  
+  if(ans.size() >= k)return 1e9;
 
-int EST::DFS(instance &ins, int k, double mini, double maxi){
-  instance tmp = ins;
-  int weight = 0;
-  for(int i = 0; i < m; i++) weight += elist[i].cost*ins.I[i];
-  int val = ComputeShortestPathLength(ins.I, ins.O, ins.s, ins.t) + weight, len = 0;
-  if(val >= maxi) return val;
+  std::vector<bool> VC(n);
+  int val = FindAppMinVC(ins, VC, 1);
+  // std::cout << "d:" << d << " n:" << n << " val:" << val<< std::endl;
+  // std::cout << "VC:";
+  // for(int i = 0; i < n; i++) {
+  //   std::cout << VC[i];
+  // }
+  // std::cout << std::endl;
+  // std::cout << " I:";
+  // for(int j = 0; j < n; j++) {
+  //   std::cout << ins.I[j];
+  // }
+  // std::cout << std::endl << " O:";
+  // for(int j = 0; j < n; j++) {
+  //   std::cout << ins.O[j];
+  // }
+  // std::cout << std::endl;
+ 
+  if(maxi <= val){
+    // if(val < 1e9) std::cout << "return for val:" << val << std::endl;
+    return val;    
+  } 
+  // std::cout << std::endl;
+
   int res = 1e9;
-  std::vector<int> P(n);
-  FindShortestPath(ins, P, len);
-  std::vector<bool> sol = ins.I;
-  for(int i = 0; i < len; i++) sol[elist[P[i]].id] = true;
-  if(mini <= val and val < maxi and ans.size() < k) {
-    ans.push_back(sol);
+  if((mini <= val and val < maxi) or output) {
+    // for(int i = 0; i < n; i++) {
+    //   if(ins.O[i] and VC[i]){
+    //     std::cout << "case 3: duplication." << std::endl;
+    //   }
+    // }
+    ans.push_back(VC);
+    output = true;
   }
-  for(int i = 0; i < len-1; i++) {
-    edge e = elist[P[i]];
-    ins.O[e.id] = true;
-    res = std::min(res, DFS(ins, k, mini, maxi));
-    ins.I[e.id] = true, ins.O[e.id] = false;
-    if(ins.s != e.to) ins.s = e.to;
-    else ins.s = e.from;
-    val += e.cost;
-  }
-  ins = tmp;
+  for(int i = 0; i < n; i++) {
+    if(VC[i] == false or ins.I[i])continue;
+    ins.O[i] = true;
+    res = std::min(res, DFS(ins, k, mini, maxi, output));
+    ins.I[i] = true, ins.O[i] = false;
+    }
+  res = std::min(res, DFS(ins, k, mini, maxi, output));
   return res;
 }
 
-void EST::print(){
+void EVC::print(){
   std::cout << "ans size:" << ans.size() << std::endl;
-  for(int i = 0; i < ans.size(); i++) {
-    for(int j = 0; j < ans[i].size(); j++) {
-      std::cout << ans[i][j];
+  // std::sort(ans.begin(), ans.end());  
+  // for(int i = 0; i < ans.size(); i++) {
+  //   if(checkVC(ans[i]) == false){
+  //     std::cerr << "not VC. " << std::endl;
+  //     exit(1);
+  //   }
+  //   int c = 0;
+  //   for(int j = 0; j < ans[i].size(); j++) {
+  //     std::cout << ans[i][j];
+  //     c += cost[j]*ans[i][j];
+  //   }
+  //   std::cout << ":" << c << std::endl;
+  //   // std::cout << std::endl;
+  // }
+  // for(int i = 0; i < n; i++) {
+  //   for(int j = 0; j < G[i].size(); j++) {
+  //     std::cout << G[i][j].to << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // std::sort(ans.begin(), ans.end());
+  // for(int i = 0; i < ans.size()-1; i++) {
+  //   if(ans[i] == ans[i+1]) {
+  //     std::cout << "duplication." << std::endl;
+  //     exit(1);
+  //   }
+  // }
+}
+
+
+
+bool EVC::checkVC(std::vector<bool> VC){
+    for(int i = 0; i < G.size(); i++) {
+        if(VC[i])continue;
+        for(int j = 0; j < G[i].size(); j++) {
+            if(VC[G[i][j].to] == false)return false;
+        }
     }
-     std::cout << std::endl;
-     int len = 0;
-     for(int j = 0; j < ans[i].size(); j++) {
-       if(ans[i][j]){
-         std::cout << "(" << elist[j].from << ", " << elist[j].to << ") ";
-         len += elist[j].cost;
-       }
-     }
-     std::cout << std::endl;
-     std::cout << "len:" << len << std::endl;
-     std::cout << std::endl;
-  }
-  for(int i = 0; i < n; i++) {
-    for(int j = 0; j < G[i].size(); j++) {
-      std::cout << G[i][j].to <<":"<< G[i][j].cost << " ";
-    }
-    std::cout << std::endl;
-  }
+    return true;
 }

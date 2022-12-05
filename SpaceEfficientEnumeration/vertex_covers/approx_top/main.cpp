@@ -17,7 +17,7 @@
 
 
 int main(int argc, char *argv[]){
-  if(argc != 2){
+  if(argc != 4){
     std::cerr << "Error : The number of input file is not 2" <<std::endl;
     return 0;
   }
@@ -27,23 +27,21 @@ int main(int argc, char *argv[]){
     std::cerr << "can't open input file: " << argv[1] << std::endl;
     return 0;
   }
-  int n, m, k, cnt = 0;
-  double eps;
+  int n, m, k = std::atoi(argv[2]), cnt = 0, W = std::atoi(argv[3]);
   std::mt19937 mt(11); 
   std::string tmp;
   getline(ist, tmp);
-  sscanf(tmp.data(), "%d %d %d %lf", &n, &m, &k, &eps);  
+  sscanf(tmp.data(), "%d %d %d %lf", &n, &m);  
   std::vector<std::vector<edge> > G(n);
   while(getline(ist, tmp)){
-    int u, v, c;
+    int u, v, c = 0;
     // sscanf(tmp.data(), "%d %d %d", &u, &v, &c);
     sscanf(tmp.data(), "%d %d", &u, &v);
-    c = (mt()%20)+1;
     G[u].push_back(edge(u, v, c, cnt));
     G[v].push_back(edge(v, u, c, cnt++));
   }
   std::vector<int> cost(n);
-  for(int i = 0; i < n; i++) cost[i] = (mt()%20)+1;
+  for(int i = 0; i < n; i++) cost[i] = (mt()%W)+1;
   std::cout << n << " " << m << std::endl;
   EVC evc(G, cost);
   
