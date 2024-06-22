@@ -1,0 +1,144 @@
+{
+    "containers": [
+        {
+            "algName": "bmr",
+            "containerName": "compsysmed/bmr"
+        },
+        {
+            "algName": "dl",
+            "containerName": "compsysmed/dl"
+        },
+        {
+            "algName": "fka.begk",
+            "containerName": "compsysmed/fka-begk"
+        },
+        {
+            "algName": "hbc",
+            "containerName": "compsysmed/hbc"
+        },
+        {
+            "algName": "ks",
+            "containerName": "compsysmed/ks"
+        },
+        {
+            "algName": "mhs2",
+            "containerName": "compsysmed/mhs2",
+            "threads": true,
+            "cutoff": true,
+            "slow": true
+        },
+        {
+            "algName": "partran",
+            "containerName": "compsysmed/partran",
+            "threads": true,
+            "slow": true
+        },
+        {
+            "algName": "mmcs",
+            "containerName": "compsysmed/shd",
+            "config": {
+                "MODE": "mmcs"
+            }
+        },
+        {
+            "algName": "rs",
+            "containerName": "compsysmed/shd",
+            "config": {
+                "MODE": "rs"
+            }
+        },
+        {
+            "algName": "htcbdd",
+            "containerName": "compsysmed/htcbdd",
+            "config": {
+                "MODE": "toda"
+            }
+        },
+        {
+            "algName": "knuth",
+            "containerName": "compsysmed/htcbdd",
+            "config": {
+                "MODE": "knuth"
+            }
+        },
+        {
+            "algName": "bool.iterative",
+            "containerName": "compsysmed/pymbd",
+            "cutoff": true,
+            "config": {
+                "ALGORITHM_NAME": "bool-iterative"
+            }
+        },
+        {
+            "algName": "hst",
+            "containerName": "compsysmed/pymbd",
+            "cutoff": true,
+            "slow": true,
+            "config": {
+                "ALGORITHM_NAME": "hst"
+            }
+        },
+        {
+            "algName": "hsdag",
+            "containerName": "compsysmed/pymbd",
+            "cutoff": true,
+            "slow": true,
+            "config": {
+                "ALGORITHM_NAME": "hsdag"
+            }
+        },
+        {
+            "algName": "staccato",
+            "containerName": "compsysmed/pymbd",
+            "cutoff": true,
+            "slow": true,
+            "config": {
+                "ALGORITHM_NAME": "staccato"
+            }
+        },
+        {
+            "algName": "pMMCS",
+            "containerName": "compsysmed/agdmhs",
+            "threads": true,
+            "cutoff": true,
+            "config": {
+                "ALGORITHM": "pmmcs"
+            }
+        },
+        {
+            "algName": "pRS",
+            "containerName": "compsysmed/agdmhs",
+            "threads": true,
+            "cutoff": true,
+            "config": {
+                "ALGORITHM": "prs"
+            }
+        },
+        {
+            "algName": "berge",
+            "containerName": "compsysmed/agdmhs",
+            "cutoff": true,
+            "slow": true,
+            "config": {
+                "ALGORITHM": "berge"
+            }
+        },
+        {
+            "algName": "bm",
+            "containerName": "compsysmed/agdmhs",
+            "threads": true,
+            "config": {
+                "ALGORITHM": "bm"
+            }
+        },
+        {
+            "algName": "ocsanaGreedy",
+            "containerName": "compsysmed/ocsanamhs",
+            "cutoff": true
+        },
+        {
+            "algName": "primdecomp",
+            "containerName": "compsysmed/primdecomp"
+        }
+    ]
+}

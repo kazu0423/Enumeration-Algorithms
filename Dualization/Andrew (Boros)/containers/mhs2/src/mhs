@@ -1,0 +1,109 @@
+#!/usr/bin/env python
+
+# MHS2 algorithm runner
+# Copyright Vera-Licona Research Group (C) 2015
+# Author: Andrew Gainer-Dewar, Ph.D. <andrew.gainer.dewar@gmail.com>
+
+# This file is part of MHSGenerationAlgorithms.
+
+# MHSGenerationAlgorithms is free software: you can redistribute it
+# and/or modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# MHSGenerationAlgorithms is distributed in the hope that it will be
+# useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+# of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+
+import simplejson as json
+import argparse
+import tempfile
+import timeit
+import sys
+import os
+
+# Set up argument processing
+parser = argparse.ArgumentParser(description='MHS runner')
+
+# Note: the help text will show input_file in the wrong place per AlgoRun, but it will still work
+parser.add_argument("input_file", help="Input file to process")
+parser.add_argument("-f", dest="output_file", default="out.dat", help="Output destination")
+
+args = parser.parse_args()
+
+# Fetch the relevant environment variables
+try:
+    threads = int(os.environ.get("THREADS", 1))
+except ValueError:
+    threads = 1
+
+if threads < 1:
+    threads = 1
+
+try:
+    cutoff_size = int(os.environ.get("CUTOFF_SIZE"))
+except (ValueError, TypeError): # Invalid or no value
+    cutoff_size = 0
+
+# Configure path
+script_dir = sys.path[0]
+
+# Read the input file
+with open(args.input_file) as input_file:
+    input_json = json.load(input_file)
+
+# Set up temporary files for input and output
+with tempfile.NamedTemporaryFile() as temp_input_file:
+    with tempfile.NamedTemporaryFile() as temp_output_file:
+        # Generate the input file
+        M = max(vert for edge in input_json["sets"] for vert in edge)
+        N = len(input_json["sets"])
+        temp_input_file.write("{0} {1}\n".format(M, N))
+
+        for edge in input_json["sets"]:
+            edge_as_bitlist = [0]*M
+            for vert in edge:
+                edge_as_bitlist[vert-1] = 1
+            edge_as_string = " ".join(str(bit) for bit in edge_as_bitlist) + " x"
+            temp_input_file.write(edge_as_string + "\n")
+
+        temp_input_file.flush()
+
+        # Process the input file
+        alg_call_parts = ['./alg/build/mhs2', '-i', temp_input_file.name, '-o', temp_output_file.name, '-T', threads]
+        if cutoff_size > 0:
+            alg_call_parts += ['-d', cutoff_size]
+
+        alg_call_string = [str(arg) for arg in alg_call_parts]
+
+        time_taken = timeit.timeit(stmt="subprocess.check_call({0}, cwd='{1}')".format(alg_call_string, script_dir),
+                                   setup="import subprocess",
+                                   number=1)
+
+        # Process the results
+        temp_output_file.seek(0)
+        lineprocessor = lambda line: sorted(map(int, line.split()[:-1]))
+        transversals = (lineprocessor(line) for line in temp_output_file if line[0] != '0')
+        results = input_json
+        results["transversals"] = transversals
+        results["timeTaken"] = time_taken
+
+        # Write the results to the output file
+        with open(args.output_file, 'w') as output_file:
+            # Pretty-print the output, but only if it isn't too big
+            if temp_input_file.tell() < 1024*1024: # Check whether result data file is more than 1MB
+                indent_level = 4
+            else:
+                indent_level = None
+
+            json.dump(results,
+                      output_file,
+                      indent = indent_level,
+                      separators = (',', ': '),
+                      iterable_as_array = True)
+
+### Emacs configuration
+# Local Variables:
+# mode: python
+# End:
