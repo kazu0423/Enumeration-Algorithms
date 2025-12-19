@@ -21,7 +21,7 @@ private:
   void EnumRec(Graph G, int depth);
   bool connectivity(Graph &G);
   Graph R;
-  // std::vector<bigint> ans;
+  std::vector<int> deg;
 };
 
 #endif // __ENUM__

@@ -32,17 +32,19 @@ int main(int argc, char *argv[]){
   std::string tmp;
   getline(ist, tmp);
   sscanf(tmp.data(), "%d %d", &n, &m);
+  std::cout << n << " " << m << std::endl;
   std::vector<std::vector<int> > G(n, std::vector<int>(n, 0));
   while(getline(ist, tmp)){
     int u, v;
-    sscanf(tmp.data(), "%d %d", &u, &v);
+    sscanf(tmp.data(), "%d %d %d", &u, &v, &cnt);
+    std::cout << u << " " << v << std::endl;
     G[u][v] = G[v][u] = 1;
   }
   std::cout << n << " " << m << std::endl;
   // PARALLEL_EIS eis(G);
   EIS eis(G);
   // std::cout << "degeneracy:" << eds.GetDegeneracy() << std::endl;
-  // std::cout << "n:" << eds.size() << std::endl;
+  std::cout << "n:" << eis.size() << std::endl;
   
   auto start = std::chrono::system_clock::now();
   eis.Enumerate();
