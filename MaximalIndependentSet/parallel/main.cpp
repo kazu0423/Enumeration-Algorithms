@@ -204,8 +204,8 @@ static void read_graph_1based(const std::string& path, bool one_based_input) {
   G.n = n;
   G.adj.assign(n + 1, {});
   for (int i = 0; i < m; i++) {
-    int u, v;
-    in >> u >> v;
+    int u, v, w;
+    in >> u >> v >> w;
     if (!one_based_input) {
       u++;
       v++;
