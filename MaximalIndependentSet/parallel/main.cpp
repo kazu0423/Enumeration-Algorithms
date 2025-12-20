@@ -3,9 +3,9 @@
 // distribution. rank0 generates tasks at cutoff depth (i == cutoff) and
 // distributes to workers dynamically.
 //
-// Build: mpicxx -O3 -std=c++17 -march=native tsukiyama_mis_mpi.cpp -o
+// Build: mpicxx -O3 -std=c++17 -march=native -fopenmp tsukiyama_mis_mpi.cpp -o
 // tsuki_mis_mpi Run  : mpirun -np 8 ./tsuki_mis_mpi graph.txt --count-only
-// --cutoff 40
+// --cutoff 40 --omp-cutoff 4
 //
 // Input (default 0-based):
 //   n m
@@ -20,6 +20,9 @@
 #include <mpi.h>
 
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -256,7 +259,7 @@ int main(int argc, char** argv) {
     if (rank == 0) {
       std::cerr << "Usage: " << argv[0]
                 << " graph.txt [--one-based] [--count-only] [--cutoff K] "
-                   "[--print-limit L]\n";
+                   "[--print-limit L] [--omp-cutoff K] [--omp-threads T]\n";
     }
     MPI_Finalize();
     return 0;
@@ -269,6 +272,8 @@ int main(int argc, char** argv) {
   // defaults: count-only for speed
   count_only = false;
   print_limit = 0;
+  int omp_cutoff = 0;
+  int omp_threads = 0;
 
   for (int i = 2; i < argc; i++) {
     std::string a = argv[i];
@@ -281,10 +286,17 @@ int main(int argc, char** argv) {
     else if (a == "--print-limit" && i + 1 < argc) {
       print_limit = (uint64_t)std::stoull(argv[++i]);
       count_only = false;
+    } else if (a == "--omp-cutoff" && i + 1 < argc) {
+      omp_cutoff = std::stoi(argv[++i]);
+    } else if (a == "--omp-threads" && i + 1 < argc) {
+      omp_threads = std::stoi(argv[++i]);
     } else if (a == "--print") {
       count_only = false;
     }  // optional
   }
+#ifdef _OPENMP
+  if (omp_threads > 0) omp_set_num_threads(omp_threads);
+#endif
 
   read_graph_1based(argv[1], one_based_input);
 
@@ -304,9 +316,41 @@ int main(int argc, char** argv) {
       // reset buckets
       for (auto& b : Bucket) b.clear();
 
-      // run subtree
-      std::vector<int> IS = t.IS;
-      BACKTRACK_seq(IS, Bucket, t.i, rank, local_printed, local_count);
+      // run subtree (optionally split into OpenMP tasks within a rank)
+      if (omp_cutoff > 0 && t.i < G.n) {
+        int local_cutoff = std::min(G.n, t.i + omp_cutoff);
+        std::vector<Task> subtasks;
+        std::vector<int> IS = t.IS;
+        std::vector<std::vector<int>> Bucket_gen(G.n + 1);
+        GEN_tasks(IS, Bucket_gen, t.i, local_cutoff, subtasks);
+
+#ifdef _OPENMP
+        uint64_t local_count_add = 0;
+        uint64_t local_printed_add = 0;
+#pragma omp parallel
+        {
+          std::vector<std::vector<int>> Bucket_omp(G.n + 1);
+#pragma omp for schedule(dynamic) reduction(+:local_count_add, local_printed_add)
+          for (int idx = 0; idx < (int)subtasks.size(); idx++) {
+            for (auto& b : Bucket_omp) b.clear();
+            std::vector<int> subIS = subtasks[idx].IS;
+            BACKTRACK_seq(subIS, Bucket_omp, subtasks[idx].i, rank,
+                          local_printed_add, local_count_add);
+          }
+        }
+        local_count += local_count_add;
+        local_printed += local_printed_add;
+#else
+        for (const auto& sub : subtasks) {
+          for (auto& b : Bucket) b.clear();
+          std::vector<int> subIS = sub.IS;
+          BACKTRACK_seq(subIS, Bucket, sub.i, rank, local_printed, local_count);
+        }
+#endif
+      } else {
+        std::vector<int> IS = t.IS;
+        BACKTRACK_seq(IS, Bucket, t.i, rank, local_printed, local_count);
+      }
 
       // report completion + ask for more
       uint64_t msg[2] = {local_count, 1};
