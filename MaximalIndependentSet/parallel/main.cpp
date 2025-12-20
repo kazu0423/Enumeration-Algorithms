@@ -16,6 +16,7 @@
 //   --cutoff K      : task cutoff depth (i index in BACKTRACK), default 40
 //   --print-limit L : print at most L MIS per rank (for debugging; ignored in
 //   count-only)
+//   --verify        : verify independence/maximality at each leaf
 
 #include <mpi.h>
 
@@ -26,6 +27,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -38,6 +40,49 @@ static Graph G;
 
 static bool count_only = true;
 static uint64_t print_limit = 0;
+static bool verify_mis = false;
+
+static void abort_not_mis(const std::vector<int>& IS, int rank,
+                          const std::string& reason) {
+  std::cerr << "[rank " << rank << "] Invalid MIS: " << reason << "\n";
+  std::cerr << "[rank " << rank << "] Set:";
+  for (int v = 1; v <= G.n; v++) {
+    if (IS[v] == 0) std::cerr << " " << v;
+  }
+  std::cerr << "\n";
+  MPI_Abort(MPI_COMM_WORLD, 1);
+}
+
+static void validate_mis_or_abort(const std::vector<int>& IS, int rank) {
+  // Independence: no edge inside the set.
+  for (int u = 1; u <= G.n; u++) {
+    if (IS[u] != 0) continue;
+    for (int v : G.adj[u]) {
+      if (v > u && IS[v] == 0) {
+        abort_not_mis(IS, rank,
+                      "edge inside set: " + std::to_string(u) + "-" +
+                          std::to_string(v));
+      }
+    }
+  }
+
+  // Maximality: every vertex outside has a neighbor inside.
+  for (int v = 1; v <= G.n; v++) {
+    if (IS[v] == 0) continue;
+    bool has_in_neighbor = false;
+    for (int u : G.adj[v]) {
+      if (IS[u] == 0) {
+        has_in_neighbor = true;
+        break;
+      }
+    }
+    if (!has_in_neighbor) {
+      abort_not_mis(IS, rank,
+                    "non-maximal: vertex " + std::to_string(v) +
+                        " can be added");
+    }
+  }
+}
 
 static inline void output_current_mis(const std::vector<int>& IS, int rank,
                                       uint64_t& local_printed,
@@ -65,8 +110,11 @@ static void BACKTRACK_seq(std::vector<int>& IS,
                           uint64_t& local_count) {
   if (i >= G.n) {
     // std::cout << "[rank " << rank << "] local_count: " << local_count << "\n";
-    if ((local_count % 1000000) == 0) output_current_mis(IS, rank, local_printed, local_count);
-    else local_count++;
+    if (verify_mis) validate_mis_or_abort(IS, rank);
+    if ((local_count % 1000000) == 0)
+      output_current_mis(IS, rank, local_printed, local_count);
+    else
+      local_count++;
     return;
   }
 
@@ -206,9 +254,14 @@ static void read_graph_1based(const std::string& path, bool one_based_input) {
   in >> n >> m;
   G.n = n;
   G.adj.assign(n + 1, {});
-  for (int i = 0; i < m; i++) {
+  std::string line;
+  std::getline(in, line);  // consume endline after header
+  for (int i = 0; i < m;) {
+    if (!std::getline(in, line)) break;
+    if (line.empty()) continue;
+    std::istringstream iss(line);
     int u, v;
-    in >> u >> v;
+    if (!(iss >> u >> v)) continue;
     if (!one_based_input) {
       u++;
       v++;
@@ -220,6 +273,7 @@ static void read_graph_1based(const std::string& path, bool one_based_input) {
     }
     G.adj[u].push_back(v);
     G.adj[v].push_back(u);
+    i++;
   }
   for (int v = 1; v <= n; v++) {
     auto& a = G.adj[v];
@@ -248,6 +302,46 @@ static bool mpi_recv_task(int src, Task& t) {
   return true;
 }
 
+static void run_task_with_optional_omp(const Task& t, int rank,
+                                       uint64_t& local_printed,
+                                       uint64_t& local_count, int omp_cutoff,
+                                       std::vector<std::vector<int>>& Bucket) {
+  if (omp_cutoff > 0 && t.i < G.n) {
+    int local_cutoff = std::min(G.n, t.i + omp_cutoff);
+    std::vector<Task> subtasks;
+    std::vector<int> IS = t.IS;
+    std::vector<std::vector<int>> Bucket_gen(G.n + 1);
+    GEN_tasks(IS, Bucket_gen, t.i, local_cutoff, subtasks);
+
+#ifdef _OPENMP
+    uint64_t local_count_add = 0;
+    uint64_t local_printed_add = 0;
+#pragma omp parallel
+    {
+      std::vector<std::vector<int>> Bucket_omp(G.n + 1);
+#pragma omp for schedule(dynamic) reduction(+:local_count_add, local_printed_add)
+      for (int idx = 0; idx < (int)subtasks.size(); idx++) {
+        for (auto& b : Bucket_omp) b.clear();
+        std::vector<int> subIS = subtasks[idx].IS;
+        BACKTRACK_seq(subIS, Bucket_omp, subtasks[idx].i, rank,
+                      local_printed_add, local_count_add);
+      }
+    }
+    local_count += local_count_add;
+    local_printed += local_printed_add;
+#else
+    for (const auto& sub : subtasks) {
+      for (auto& b : Bucket) b.clear();
+      std::vector<int> subIS = sub.IS;
+      BACKTRACK_seq(subIS, Bucket, sub.i, rank, local_printed, local_count);
+    }
+#endif
+  } else {
+    std::vector<int> IS = t.IS;
+    BACKTRACK_seq(IS, Bucket, t.i, rank, local_printed, local_count);
+  }
+}
+
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
 
@@ -259,7 +353,8 @@ int main(int argc, char** argv) {
     if (rank == 0) {
       std::cerr << "Usage: " << argv[0]
                 << " graph.txt [--one-based] [--count-only] [--cutoff K] "
-                   "[--print-limit L] [--omp-cutoff K] [--omp-threads T]\n";
+                   "[--print-limit L] [--omp-cutoff K] [--omp-threads T] "
+                   "[--verify] [--master-work]\n";
     }
     MPI_Finalize();
     return 0;
@@ -274,6 +369,7 @@ int main(int argc, char** argv) {
   print_limit = 0;
   int omp_cutoff = 0;
   int omp_threads = 0;
+  bool master_work = false;
 
   for (int i = 2; i < argc; i++) {
     std::string a = argv[i];
@@ -290,6 +386,10 @@ int main(int argc, char** argv) {
       omp_cutoff = std::stoi(argv[++i]);
     } else if (a == "--omp-threads" && i + 1 < argc) {
       omp_threads = std::stoi(argv[++i]);
+    } else if (a == "--verify") {
+      verify_mis = true;
+    } else if (a == "--master-work") {
+      master_work = true;
     } else if (a == "--print") {
       count_only = false;
     }  // optional
@@ -316,41 +416,8 @@ int main(int argc, char** argv) {
       // reset buckets
       for (auto& b : Bucket) b.clear();
 
-      // run subtree (optionally split into OpenMP tasks within a rank)
-      if (omp_cutoff > 0 && t.i < G.n) {
-        int local_cutoff = std::min(G.n, t.i + omp_cutoff);
-        std::vector<Task> subtasks;
-        std::vector<int> IS = t.IS;
-        std::vector<std::vector<int>> Bucket_gen(G.n + 1);
-        GEN_tasks(IS, Bucket_gen, t.i, local_cutoff, subtasks);
-
-#ifdef _OPENMP
-        uint64_t local_count_add = 0;
-        uint64_t local_printed_add = 0;
-#pragma omp parallel
-        {
-          std::vector<std::vector<int>> Bucket_omp(G.n + 1);
-#pragma omp for schedule(dynamic) reduction(+:local_count_add, local_printed_add)
-          for (int idx = 0; idx < (int)subtasks.size(); idx++) {
-            for (auto& b : Bucket_omp) b.clear();
-            std::vector<int> subIS = subtasks[idx].IS;
-            BACKTRACK_seq(subIS, Bucket_omp, subtasks[idx].i, rank,
-                          local_printed_add, local_count_add);
-          }
-        }
-        local_count += local_count_add;
-        local_printed += local_printed_add;
-#else
-        for (const auto& sub : subtasks) {
-          for (auto& b : Bucket) b.clear();
-          std::vector<int> subIS = sub.IS;
-          BACKTRACK_seq(subIS, Bucket, sub.i, rank, local_printed, local_count);
-        }
-#endif
-      } else {
-        std::vector<int> IS = t.IS;
-        BACKTRACK_seq(IS, Bucket, t.i, rank, local_printed, local_count);
-      }
+      run_task_with_optional_omp(t, rank, local_printed, local_count,
+                                 omp_cutoff, Bucket);
 
       // report completion + ask for more
       uint64_t msg[2] = {local_count, 1};
@@ -372,8 +439,7 @@ int main(int argc, char** argv) {
     std::vector<int> IS(G.n + 1, 0);
     std::vector<std::vector<int>> Bucket(G.n + 1);
 
-    std::vector<Task> tasks;
-    tasks.reserve(100000);
+    std::vector<Task> tasks;   tasks.reserve(100000);
 
     // initial call in our sequential code was BACKTRACK(1); keep that
     // convention: Task nodes represent entry to BACKTRACK(i).
@@ -388,6 +454,8 @@ int main(int argc, char** argv) {
     int active_workers = size - 1;
 
     uint64_t global_count = 0;
+    uint64_t local_count = 0, local_printed = 0;
+    std::vector<std::vector<int>> Bucket_master(G.n + 1);
 
     // wait for workers to be ready, then send initial tasks
     for (int w = 1; w < size; w++) {
@@ -402,12 +470,29 @@ int main(int argc, char** argv) {
       }
     }
 
-    // loop: receive progress and keep feeding tasks
-    while (active_workers > 0) {
+    // loop: receive progress, keep feeding tasks, and optionally do work here
+    while (active_workers > 0 || next_task < (int)tasks.size()) {
       MPI_Status st;
       uint64_t msg[2];
-      MPI_Recv(msg, 2, MPI_UINT64_T, MPI_ANY_SOURCE, MPI_ANY_TAG,
-               MPI_COMM_WORLD, &st);
+      int flag = 0;
+      MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &st);
+
+      if (!flag && master_work && next_task < (int)tasks.size()) {
+        Task t = tasks[next_task++];
+        uint64_t before = local_count;
+        run_task_with_optional_omp(t, 0, local_printed, local_count, omp_cutoff,
+                                   Bucket_master);
+        global_count += (local_count - before);
+        continue;
+      }
+
+      if (!flag) {
+        MPI_Recv(msg, 2, MPI_UINT64_T, MPI_ANY_SOURCE, MPI_ANY_TAG,
+                 MPI_COMM_WORLD, &st);
+      } else {
+        MPI_Recv(msg, 2, MPI_UINT64_T, st.MPI_SOURCE, st.MPI_TAG,
+                 MPI_COMM_WORLD, &st);
+      }
       int src = st.MPI_SOURCE;
 
       // msg[0] is sender's local_count so far (cumulative), msg[1] is
