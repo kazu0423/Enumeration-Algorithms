@@ -25,14 +25,14 @@ int main(int argc, char *argv[]){
     std::cerr << "can't open input file: " << argv[1] << std::endl;
     return 0;
   }
-  int n;
+  int n, m;
   std::string tmp;
   getline(ist, tmp);
-  sscanf(tmp.data(), "%d", &n);
+  sscanf(tmp.data(), "%d %d", &n, &m);
   Graph g(n);
   while(getline(ist, tmp)){
-    int u, v;
-    sscanf(tmp.data(), "%d %d", &u, &v);
+    int u, v, w;
+    sscanf(tmp.data(), "%d %d %d", &u, &v, &w);
     g[v].emplace_back(u);
     g[u].emplace_back(v);
   }
