@@ -1,339 +1,199 @@
-// mis_reverse_search_mpi.cpp
-// Reverse search enumeration of Maximal Independent Sets (MIS)
-// based on Eppstein (2004) "All Maximal Independent Sets and Dynamic Dominance
-// for Sparse Graphs" MPI parallelization: distribute the root's children by
-// (child_index % world_size).
+// tsukiyama_mis_mpi.cpp
+// Parallel Tsukiyama MIS enumeration (Fig.4) via "reverse-search style" subtree
+// distribution. rank0 generates tasks at cutoff depth (i == cutoff) and
+// distributes to workers dynamically.
 //
-// Build: mpicxx -O3 -std=c++17 -march=native mis_reverse_search_mpi.cpp -o
-// mis_rs Run : mpirun -np 4 ./mis_rs graph.txt --one-based  (if input vertices
-// are 1..n) Input format (default 0-based):
+// Build: mpicxx -O3 -std=c++17 -march=native tsukiyama_mis_mpi.cpp -o
+// tsuki_mis_mpi Run  : mpirun -np 8 ./tsuki_mis_mpi graph.txt --count-only
+// --cutoff 40
+//
+// Input (default 0-based):
 //   n m
-//   u v   (m lines, undirected, no self-loops)
-//
-// Output: each rank prints MIS as sorted vertex list on stdout with a rank
-// prefix.
+//   u v (m lines, undirected)
+// Options:
+//   --one-based     : input vertices are 1..n
+//   --count-only    : don't print MIS, just count (recommended)
+//   --cutoff K      : task cutoff depth (i index in BACKTRACK), default 40
+//   --print-limit L : print at most L MIS per rank (for debugging; ignored in
+//   count-only)
 
 #include <mpi.h>
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
-#include <numeric>
 #include <string>
 #include <vector>
 
-struct Bitset {
-  int n = 0;
-  int w = 0;
-  std::vector<uint64_t> a;
-
-  Bitset() = default;
-  explicit Bitset(int n_) { init(n_); }
-
-  void init(int n_) {
-    n = n_;
-    w = (n + 63) / 64;
-    a.assign(w, 0ULL);
-  }
-
-  void set(int i) { a[i >> 6] |= (1ULL << (i & 63)); }
-  void reset(int i) { a[i >> 6] &= ~(1ULL << (i & 63)); }
-  bool test(int i) const { return (a[i >> 6] >> (i & 63)) & 1ULL; }
-
-  void clear() { std::fill(a.begin(), a.end(), 0ULL); }
-
-  bool equals(const Bitset& o) const { return a == o.a; }
-
-  bool empty() const {
-    for (uint64_t x : a)
-      if (x) return false;
-    return true;
-  }
-
-  int popcount() const {
-    int s = 0;
-    for (uint64_t x : a) s += __builtin_popcountll(x);
-    return s;
-  }
-
-  Bitset operator|(const Bitset& o) const {
-    Bitset r(n);
-    for (int i = 0; i < w; i++) r.a[i] = a[i] | o.a[i];
-    return r;
-  }
-  Bitset operator&(const Bitset& o) const {
-    Bitset r(n);
-    for (int i = 0; i < w; i++) r.a[i] = a[i] & o.a[i];
-    return r;
-  }
-  Bitset operator~() const {
-    Bitset r(n);
-    for (int i = 0; i < w; i++) r.a[i] = ~a[i];
-    // mask off extra bits
-    int extra = w * 64 - n;
-    if (extra > 0) {
-      uint64_t mask = (extra == 64) ? 0ULL : (~0ULL >> extra);
-      r.a[w - 1] &= mask;
-    }
-    return r;
-  }
-
-  Bitset& operator|=(const Bitset& o) {
-    for (int i = 0; i < w; i++) a[i] |= o.a[i];
-    return *this;
-  }
-  Bitset& operator&=(const Bitset& o) {
-    for (int i = 0; i < w; i++) a[i] &= o.a[i];
-    return *this;
-  }
-
-  std::vector<int> to_list_sorted() const {
-    std::vector<int> res;
-    res.reserve(popcount());
-    for (int i = 0; i < n; i++)
-      if (test(i)) res.push_back(i);
-    return res;
-  }
-};
-
 struct Graph {
-  int n = 0;
-  std::vector<Bitset> nb;  // open neighborhood bitset
-  Bitset all;              // all-ones mask (size n)
-
-  explicit Graph(int n_ = 0) : n(n_), nb(n_), all(n_) {
-    for (int i = 0; i < n; i++) {
-      nb[i].init(n);
-      all.set(i);
-    }
-  }
+  int n = 0;  // number of vertices, internal indexing 1..n
+  std::vector<std::vector<int>> adj;
 };
 
 static Graph G;
 
-// Greedy lexicographically-first maximal independent superset of 'base'.
-// Order is 0,1,2,...,n-1.
-static Bitset greedy_complete(Bitset base) {
-  for (int v = 0; v < G.n; v++) {
-    if (base.test(v)) continue;
-    // check v is independent of base: no neighbor in base
-    Bitset inter = base & G.nb[v];
-    if (inter.empty()) base.set(v);
-  }
-  return base;  // maximal by construction
+static bool count_only = true;
+static uint64_t print_limit = 0;
+
+static inline void output_current_mis(const std::vector<int>& IS, int rank,
+                                      uint64_t& local_printed,
+                                      uint64_t& local_count) {
+  local_count++;
+  if (count_only) return;
+  if (print_limit > 0 && local_printed >= print_limit) return;
+
+  std::vector<int> mis;
+  mis.reserve(G.n);
+  for (int v = 1; v <= G.n; v++)
+    if (IS[v] == 0) mis.push_back(v);
+
+  std::cout << "[rank " << rank << "] MIS(size=" << mis.size() << "):";
+  for (int v : mis) std::cout << " " << v;
+  std::cout << ", local count: " << local_count << "\n";
+  local_printed++;
 }
 
-static bool is_maximal_independent(const Bitset& S) {
-  // independence is not re-checked here (assumed by construction), but we could
-  // add it if needed.
-  Bitset dominated = S;  // vertices in S are "covered" for maximality test
-  for (int v = 0; v < G.n; v++)
-    if (S.test(v)) dominated |= G.nb[v];
-  return dominated.equals(G.all);
-}
-
-static Bitset LFMIS;  // lexicographically first MIS
-static std::vector<std::vector<int>>
-    later;  // later[v] lists vertices assigned to v in LFMIS
-
-static Bitset parent_of(const Bitset& S) {
-  // If S == LFMIS, parent is itself (root).
-  // Find earliest v in LFMIS \ S.
-  int v = -1;
-  for (int i = 0; i < G.n; i++) {
-    if (LFMIS.test(i) && !S.test(i)) {
-      v = i;
-      break;
-    }
-  }
-  if (v == -1) return S;  // root
-
-  // N = neighbors(v) ∩ S
-  Bitset N = S & G.nb[v];
-
-  // X = (S ∪ {v}) \ N
-  Bitset X = S;
-  X.set(v);
-  X = X & (~N);
-
-  // parent(S) = greedy_complete(X)
-  return greedy_complete(X);
-}
-
-struct MPIContext {
-  int rank = 0;
-  int size = 1;
-};
-
-// Enumerate all independent (vertex) subsets of 'cand' (given as list) and call
-// cb(subset_bitset). This is exponential in |cand|; intended for sparse / small
-// later(v).
-template <class Callback>
-static void enumerate_independent_subsets(
-    const std::vector<int>& cand, int idx, Bitset& chosen,
-    Bitset& forbidden,  // vertices that cannot be chosen due to adjacency with
-                        // chosen
-    Callback&& cb) {
-  if (idx == (int)cand.size()) {
-    if (!chosen.empty()) cb(chosen);
+// Direct translation of Fig.4 BACKTRACK(i), but purely on passed-in IS (no
+// globals).
+static void BACKTRACK_seq(std::vector<int>& IS,
+                          std::vector<std::vector<int>>& Bucket, int i,
+                          int rank, uint64_t& local_printed,
+                          uint64_t& local_count) {
+  if (i >= G.n) {
+    // std::cout << "[rank " << rank << "] local_count: " << local_count << "\n";
+    if ((local_count % 1000000) == 0) output_current_mis(IS, rank, local_printed, local_count);
+    else local_count++;
     return;
   }
 
-  int u = cand[idx];
+  int x = i + 1;
+  int c = 0;
 
-  // Option 1: skip u
-  enumerate_independent_subsets(cand, idx + 1, chosen, forbidden, cb);
-
-  // Option 2: take u if allowed (not forbidden)
-  if (!forbidden.test(u)) {
-    // update
-    chosen.set(u);
-
-    Bitset old_forbidden = forbidden;
-    forbidden.set(u);
-    forbidden |= G.nb[u];
-
-    enumerate_independent_subsets(cand, idx + 1, chosen, forbidden, cb);
-
-    // rollback
-    forbidden = std::move(old_forbidden);
-    chosen.reset(u);
-  }
-}
-
-static void output_set(const MPIContext& mpi, const Bitset& S) {
-  auto lst = S.to_list_sorted();
-  std::cout << "[rank " << mpi.rank << "] MIS(size=" << lst.size() << "):";
-  for (int v : lst) std::cout << " " << v;
-  std::cout << "\n";
-}
-
-// DFS reverse search from node S (serial within a rank)
-static void search_dfs(const MPIContext& mpi, const Bitset& S) {
-  output_set(mpi, S);
-
-  // For each v in order:
-  // if v not in LFMIS continue
-  // if v not in S break
-  for (int v = 0; v < G.n; v++) {
-    if (!LFMIS.test(v)) continue;
-    if (!S.test(v)) break;
-
-    const auto& Lv = later[v];
-    if (Lv.empty()) continue;
-
-    Bitset chosen(G.n), forbidden(G.n);
-    chosen.clear();
-    forbidden.clear();
-
-    enumerate_independent_subsets(Lv, 0, chosen, forbidden,
-                                  [&](const Bitset& Nset) {
-                                    // T = (S ∪ N) \ (neighbors of N)
-                                    Bitset neigh_union(G.n);
-                                    neigh_union.clear();
-                                    for (int u : Nset.to_list_sorted()) {
-                                      neigh_union |= G.nb[u];
-                                    }
-                                    Bitset T = (S | Nset) & (~neigh_union);
-
-                                    if (!is_maximal_independent(T)) return;
-                                    Bitset p = parent_of(T);
-                                    if (!p.equals(S)) return;
-
-                                    search_dfs(mpi, T);
-                                  });
-  }
-}
-
-// Enumerate root's children in a fixed order, distribute by child_index %
-// mpi.size
-static void parallel_search_from_root(const MPIContext& mpi) {
-  // Root is LFMIS itself
-  if (mpi.rank == 0) {
-    std::cerr << "Root (LFMIS) size = " << LFMIS.popcount() << "\n";
-    std::cerr << "MPI ranks = " << mpi.size << "\n";
+  // C1
+  for (int y : G.adj[x]) {
+    if (y <= i && IS[y] == 0) c++;
   }
 
-  // Output root only from rank 0 (avoid duplicates)
-  if (mpi.rank == 0) output_set(mpi, LFMIS);
+  if (c == 0) {
+    // L1/B1/L2
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] += 1;
+    BACKTRACK_seq(IS, Bucket, x, rank, local_printed, local_count);
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] -= 1;
+  } else {
+    // B2
+    IS[x] = c;
+    BACKTRACK_seq(IS, Bucket, x, rank, local_printed, local_count);
+    IS[x] = 0;
 
-  long long child_index = 0;
+    // C2/C3
+    bool f = true;
+    Bucket[x].clear();
 
-  // generate children of root exactly like in search_dfs, but dispatch each
-  // child subtree.
-  const Bitset& S = LFMIS;
-  for (int v = 0; v < G.n; v++) {
-    if (!LFMIS.test(v)) continue;
-    // For root, S contains all vertices of LFMIS, so never breaks
+    for (int y : G.adj[x]) {
+      if (y < 1 || y > i) continue;
 
-    const auto& Lv = later[v];
-    if (Lv.empty()) continue;
-
-    Bitset chosen(G.n), forbidden(G.n);
-    chosen.clear();
-    forbidden.clear();
-
-    enumerate_independent_subsets(Lv, 0, chosen, forbidden,
-                                  [&](const Bitset& Nset) {
-                                    Bitset neigh_union(G.n);
-                                    neigh_union.clear();
-                                    for (int u : Nset.to_list_sorted())
-                                      neigh_union |= G.nb[u];
-
-                                    Bitset T = (S | Nset) & (~neigh_union);
-
-                                    if (!is_maximal_independent(T)) return;
-                                    Bitset p = parent_of(T);
-                                    if (!p.equals(S)) return;
-
-                                    long long idx = child_index++;
-                                    if ((idx % mpi.size) != mpi.rank) return;
-
-                                    // each rank explores its assigned child
-                                    search_dfs(mpi, T);
-                                  });
-  }
-
-  // A barrier helps flush output more cleanly.
-  MPI_Barrier(MPI_COMM_WORLD);
-}
-
-static void build_LFMIS_and_later() {
-  // LFMIS
-  Bitset empty(G.n);
-  empty.clear();
-  LFMIS = greedy_complete(empty);
-
-  // later(v) partition for v in LFMIS
-  later.assign(G.n, {});
-  for (int u = 0; u < G.n; u++) {
-    if (LFMIS.test(u)) continue;
-
-    int best = -1;
-    // earliest neighbor in LFMIS
-    for (int v = 0; v < G.n; v++) {
-      if (!LFMIS.test(v)) continue;
-      if (G.nb[u].test(v)) {
-        best = v;
-        break;
+      if (IS[y] == 0) {
+        Bucket[x].push_back(y);
+        for (int z : G.adj[y]) {
+          if (z <= i) {
+            IS[z] -= 1;
+            if (IS[z] == 0) f = false;
+          }
+        }
       }
+      IS[y] += 1;
     }
-    if (best != -1) later[best].push_back(u);
-    // If best == -1, u has no neighbor in LFMIS; but that contradicts
-    // maximality of LFMIS. We'll assert for sanity.
-    else {
-      std::cerr << "Warning: vertex " << u
-                << " has no neighbor in LFMIS (unexpected)\n";
-    }
-  }
 
-  // sort each later[v] to make enumeration deterministic
-  for (auto& vec : later) std::sort(vec.begin(), vec.end());
+    // B3
+    if (f) BACKTRACK_seq(IS, Bucket, x, rank, local_printed, local_count);
+
+    // L3
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] -= 1;
+
+    // L4/L5
+    for (int y : Bucket[x]) {
+      for (int z : G.adj[y])
+        if (z <= i) IS[z] += 1;
+    }
+    Bucket[x].clear();
+  }
 }
 
-static void read_graph(const std::string& path, bool one_based) {
+// A task is an entry state of BACKTRACK(i): (i, IS[1..n]) with all Buckets
+// empty.
+struct Task {
+  int i;
+  std::vector<int> IS;
+};
+
+// rank0: generate tasks by simulating Tsukiyama recursion but cutting off at
+// i==cutoff
+static void GEN_tasks(std::vector<int>& IS,
+                      std::vector<std::vector<int>>& Bucket, int i, int cutoff,
+                      std::vector<Task>& out_tasks) {
+  if (i >= G.n) {
+    // leaf would be a task too, but we can just keep it as a task at i==n
+    out_tasks.push_back(Task{i, IS});
+    return;
+  }
+  if (i >= cutoff) {
+    out_tasks.push_back(Task{i, IS});
+    return;
+  }
+
+  int x = i + 1;
+  int c = 0;
+  for (int y : G.adj[x]) {
+    if (y <= i && IS[y] == 0) c++;
+  }
+
+  if (c == 0) {
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] += 1;
+    GEN_tasks(IS, Bucket, x, cutoff, out_tasks);
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] -= 1;
+  } else {
+    IS[x] = c;
+    GEN_tasks(IS, Bucket, x, cutoff, out_tasks);
+    IS[x] = 0;
+
+    bool f = true;
+    Bucket[x].clear();
+
+    for (int y : G.adj[x]) {
+      if (y < 1 || y > i) continue;
+
+      if (IS[y] == 0) {
+        Bucket[x].push_back(y);
+        for (int z : G.adj[y]) {
+          if (z <= i) {
+            IS[z] -= 1;
+            if (IS[z] == 0) f = false;
+          }
+        }
+      }
+      IS[y] += 1;
+    }
+
+    if (f) GEN_tasks(IS, Bucket, x, cutoff, out_tasks);
+
+    for (int y : G.adj[x])
+      if (y <= i) IS[y] -= 1;
+
+    for (int y : Bucket[x]) {
+      for (int z : G.adj[y])
+        if (z <= i) IS[z] += 1;
+    }
+    Bucket[x].clear();
+  }
+}
+
+static void read_graph_1based(const std::string& path, bool one_based_input) {
   std::ifstream in(path);
   if (!in) {
     std::cerr << "Cannot open: " << path << "\n";
@@ -341,57 +201,202 @@ static void read_graph(const std::string& path, bool one_based) {
   }
   int n, m;
   in >> n >> m;
-  G = Graph(n);
-
+  G.n = n;
+  G.adj.assign(n + 1, {});
   for (int i = 0; i < m; i++) {
     int u, v;
     in >> u >> v;
-    if (one_based) {
-      --u;
-      --v;
-    }
-    if (u < 0 || v < 0 || u >= n || v >= n) {
+    if (!one_based_input) {
+      u++;
+      v++;
+    }  // 0-based -> 1-based
+    if (u == v) continue;
+    if (u < 1 || u > n || v < 1 || v > n) {
       std::cerr << "Edge out of range: " << u << " " << v << "\n";
       std::exit(1);
     }
-    if (u == v) continue;
-    G.nb[u].set(v);
-    G.nb[v].set(u);
+    G.adj[u].push_back(v);
+    G.adj[v].push_back(u);
   }
+  for (int v = 1; v <= n; v++) {
+    auto& a = G.adj[v];
+    std::sort(a.begin(), a.end());
+    a.erase(std::unique(a.begin(), a.end()), a.end());
+  }
+}
+
+static void mpi_send_task(int dest, const Task& t) {
+  int n = (int)t.IS.size();
+  MPI_Send(&t.i, 1, MPI_INT, dest, 1, MPI_COMM_WORLD);
+  MPI_Send(&n, 1, MPI_INT, dest, 1, MPI_COMM_WORLD);
+  MPI_Send(t.IS.data(), n, MPI_INT, dest, 1, MPI_COMM_WORLD);
+}
+
+static bool mpi_recv_task(int src, Task& t) {
+  MPI_Status st;
+  int i;
+  MPI_Recv(&i, 1, MPI_INT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
+  if (i < 0) return false;  // termination
+  int n;
+  MPI_Recv(&n, 1, MPI_INT, src, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  t.i = i;
+  t.IS.assign(n, 0);
+  MPI_Recv(t.IS.data(), n, MPI_INT, src, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  return true;
 }
 
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
 
-  MPIContext mpi;
-  MPI_Comm_rank(MPI_COMM_WORLD, &mpi.rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &mpi.size);
+  int rank = 0, size = 1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
 
   if (argc < 2) {
-    if (mpi.rank == 0) {
-      std::cerr << "Usage: " << argv[0] << " graph.txt [--one-based]\n";
+    if (rank == 0) {
+      std::cerr << "Usage: " << argv[0]
+                << " graph.txt [--one-based] [--count-only] [--cutoff K] "
+                   "[--print-limit L]\n";
     }
     MPI_Finalize();
     return 0;
   }
 
-  std::string path = argv[1];
-  bool one_based = false;
+  bool one_based_input = false;
+  int cutoff =
+      40;  // default: makes enough tasks on many graphs, but safe for n~300
+
+  // defaults: count-only for speed
+  count_only = false;
+  print_limit = 0;
+
   for (int i = 2; i < argc; i++) {
     std::string a = argv[i];
-    if (a == "--one-based") one_based = true;
+    if (a == "--one-based")
+      one_based_input = true;
+    else if (a == "--count-only")
+      count_only = true;
+    else if (a == "--cutoff" && i + 1 < argc)
+      cutoff = std::stoi(argv[++i]);
+    else if (a == "--print-limit" && i + 1 < argc) {
+      print_limit = (uint64_t)std::stoull(argv[++i]);
+      count_only = false;
+    } else if (a == "--print") {
+      count_only = false;
+    }  // optional
   }
 
-  read_graph(path, one_based);
-  build_LFMIS_and_later();
+  read_graph_1based(argv[1], one_based_input);
 
-  // sanity: LFMIS should be maximal
-  if (mpi.rank == 0 && !is_maximal_independent(LFMIS)) {
-    std::cerr << "Internal error: LFMIS is not maximal.\n";
-    MPI_Abort(MPI_COMM_WORLD, 2);
+  // worker loop
+  if (rank != 0) {
+    uint64_t local_count = 0, local_printed = 0;
+    std::vector<std::vector<int>> Bucket(G.n + 1);
+
+    // tell master we're ready
+    int ready = 1;
+    MPI_Send(&ready, 1, MPI_INT, 0, 2, MPI_COMM_WORLD);
+
+    while (true) {
+      Task t;
+      if (!mpi_recv_task(0, t)) break;
+
+      // reset buckets
+      for (auto& b : Bucket) b.clear();
+
+      // run subtree
+      std::vector<int> IS = t.IS;
+      BACKTRACK_seq(IS, Bucket, t.i, rank, local_printed, local_count);
+
+      // report completion + ask for more
+      uint64_t msg[2] = {local_count, 1};
+      MPI_Send(msg, 2, MPI_UINT64_T, 0, 3, MPI_COMM_WORLD);
+    }
+
+    // send final count
+    uint64_t done_msg[2] = {local_count, 0};
+    MPI_Send(done_msg, 2, MPI_UINT64_T, 0, 4, MPI_COMM_WORLD);
+    std::cout << "Finish:[" << rank << "] MIS count = " << local_count << "\n";
+
+    MPI_Finalize();
+    return 0;
   }
 
-  parallel_search_from_root(mpi);
+  // -------- rank0 master --------
+  if (rank == 0) {
+    // generate tasks
+    std::vector<int> IS(G.n + 1, 0);
+    std::vector<std::vector<int>> Bucket(G.n + 1);
+
+    std::vector<Task> tasks;
+    tasks.reserve(100000);
+
+    // initial call in our sequential code was BACKTRACK(1); keep that
+    // convention: Task nodes represent entry to BACKTRACK(i).
+    GEN_tasks(IS, Bucket, 1, cutoff, tasks);
+
+    std::cerr << "Generated tasks = " << tasks.size()
+              << " at cutoff i=" << cutoff << " with MPI ranks=" << size
+              << "\n";
+
+    // dynamic dispatch
+    int next_task = 0;
+    int active_workers = size - 1;
+
+    uint64_t global_count = 0;
+
+    // wait for workers to be ready, then send initial tasks
+    for (int w = 1; w < size; w++) {
+      int ready = 0;
+      MPI_Recv(&ready, 1, MPI_INT, w, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+      if (next_task < (int)tasks.size()) {
+        mpi_send_task(w, tasks[next_task++]);
+      } else {
+        int term = -1;
+        MPI_Send(&term, 1, MPI_INT, w, 1, MPI_COMM_WORLD);
+      }
+    }
+
+    // loop: receive progress and keep feeding tasks
+    while (active_workers > 0) {
+      MPI_Status st;
+      uint64_t msg[2];
+      MPI_Recv(msg, 2, MPI_UINT64_T, MPI_ANY_SOURCE, MPI_ANY_TAG,
+               MPI_COMM_WORLD, &st);
+      int src = st.MPI_SOURCE;
+
+      // msg[0] is sender's local_count so far (cumulative), msg[1] is
+      // "wants_more" flag We do NOT add msg[0] each time (it’s cumulative);
+      // instead we just remember last value per worker.
+      static std::vector<uint64_t> last_count;
+      if (last_count.empty()) last_count.assign(size, 0);
+
+      uint64_t delta = msg[0] - last_count[src];
+      last_count[src] = msg[0];
+      global_count += delta;
+
+      if (st.MPI_TAG == 4) {
+        // worker done
+        active_workers--;
+        continue;
+      }
+
+      // feed next task or terminate
+      if (next_task < (int)tasks.size()) {
+        mpi_send_task(src, tasks[next_task++]);
+      } else {
+        int term = -1;
+        MPI_Send(&term, 1, MPI_INT, src, 1, MPI_COMM_WORLD);
+      }
+    }
+
+    // master also needs to count its own tasks? In this design, master does not
+    // compute subtrees. If you want master to also work, we can easily add
+    // that, but keeping master pure simplifies scheduling.
+
+    std::cout << "MIS count = " << global_count << "\n";
+  }
 
   MPI_Finalize();
   return 0;
