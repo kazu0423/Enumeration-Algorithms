@@ -1,13 +1,13 @@
-SRCS	 = main.cpp 
-CXX		 = g++-7
+SRCS	 = main.cpp
+CXX		 = mpicxx
 CXXFLAGS = -std=c++14 -O3
-EXE		 = EDS
+EXE		 = LCM
 
-EDS:$(SRCS)
+LCM:$(SRCS)
 	$(CXX)  $(SRCS) -o $@ $(CXXFLAGS)
 
 debug:$(SRCS)
 	$(CXX) $(CXXFLAGS) -D_GLIBCXX_DEBUG $(SRCS) -o $@
 
 clean:
-	-rm -f EDS
+	-rm -f LCM
